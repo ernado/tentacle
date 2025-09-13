@@ -1,0 +1,2 @@
+# requirements.txt
+yt-dlp @git+https://github.com/yt-dlp/yt-dlp.git@65e90aea29cf3bfc9d1ae3e009fbf9a8db3a23c9
