@@ -33,6 +33,7 @@ func StreamFile(
 		index             int
 	)
 	go func() {
+		<-done
 		lastPartAvailable = true
 		lg.Info("Last part available")
 	}()

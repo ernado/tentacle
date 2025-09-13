@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -183,12 +182,30 @@ func main() {
 
 					return nil
 				})
+
+				// Upload part by part, streaming video from disk.
+				id, err := crypto.RandInt64(crypto.DefaultRand())
+				if err != nil {
+					return errors.Wrap(err, "generate id")
+				}
+
+				totalParts := -1
+				uploadRequests := make(chan *tg.UploadSaveBigFilePartRequest)
+
+				for j := 0; j < 3; j++ {
+					g.Go(func() error {
+						for req := range uploadRequests {
+							if _, err := api.UploadSaveBigFilePart(ctx, req); err != nil {
+								return errors.Wrap(err, "upload part")
+							}
+						}
+
+						return nil
+					})
+				}
+
 				g.Go(func() error {
-					// Upload part by part, streaming video from disk.
-					id, err := crypto.RandInt64(crypto.DefaultRand())
-					if err != nil {
-						return errors.Wrap(err, "generate id")
-					}
+					defer close(uploadRequests)
 
 					stat, err := os.Stat(outputPath)
 					if err != nil {
@@ -201,7 +218,6 @@ func main() {
 					)
 
 					const partSize = uploader.MaximumPartSize
-					totalParts := -1
 					if err := ytio.StreamFile(gCtx, done, outputPath, partSize, func(part ytio.StreamPart) error {
 						if len(part.Data) == 0 {
 							lg.Info("Skip empty part")
@@ -214,16 +230,19 @@ func main() {
 							)
 						}
 						if part.Last {
-							totalParts = part.Index
+							totalParts = part.Index + 1
 						}
-						_, err := api.UploadSaveBigFilePart(ctx, &tg.UploadSaveBigFilePartRequest{
+
+						select {
+						case <-gCtx.Done():
+							return gCtx.Err()
+						case uploadRequests <- &tg.UploadSaveBigFilePartRequest{
 							FileID:         id,
 							FilePart:       part.Index,
 							FileTotalParts: totalParts,
 							Bytes:          part.Data,
-						})
-						if err != nil {
-							return errors.Wrap(err, "upload part")
+						}:
+							lg.Info("Enqueued part", zap.Int("index", part.Index))
 						}
 
 						return nil
@@ -245,13 +264,16 @@ func main() {
 						return errors.Wrap(err, "read full")
 					}
 
-					if _, err = api.UploadSaveBigFilePart(ctx, &tg.UploadSaveBigFilePartRequest{
+					select {
+					case <-gCtx.Done():
+						return gCtx.Err()
+					case uploadRequests <- &tg.UploadSaveBigFilePartRequest{
 						FileID:         id,
 						FilePart:       1,
 						FileTotalParts: totalParts,
 						Bytes:          data,
-					}); err != nil {
-						return errors.Wrap(err, "upload moov")
+					}:
+						lg.Info("Enqueued moov")
 					}
 
 					return nil
@@ -284,24 +306,6 @@ func main() {
 					return errors.Wrap(err, "upload")
 				}
 
-				stat, err := os.Stat(outputPath)
-				if err != nil {
-					return errors.Wrap(err, "stat")
-				}
-				partSize := 128 * 1024
-				size := stat.Size()
-				const (
-					kb int64 = 1024
-					mb       = kb * 1024
-					gb       = mb * 1024
-				)
-				if size > 100*mb {
-					partSize = uploader.MaximumPartSize
-				}
-				if size > 4*gb {
-					return errors.Wrapf(err, "%s: file too big", outputPath)
-				}
-
 				probe, err := i.Probe(ctx, outputPath)
 				if err != nil {
 					return err
@@ -317,17 +321,13 @@ func main() {
 					zap.Int("height", summary.Height),
 				)
 
-				const threads = 3
-				upload, err := uploader.NewUploader(api).
-					WithThreads(threads).
-					WithPartSize(partSize).
-					FromPath(ctx, outputPath)
-				if err != nil {
-					return fmt.Errorf("upload: %w", err)
-				}
 				lg.Info("Uploaded")
 				if _, err := reply.Media(ctx,
-					message.UploadedDocument(upload).
+					message.UploadedDocument(&tg.InputFileBig{
+						ID:    id,
+						Parts: totalParts,
+						Name:  "video.mp4",
+					}).
 						Filename("output.mp4").
 						MIME("video/mp4").
 						Thumb(screen).
