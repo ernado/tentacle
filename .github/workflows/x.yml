@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  actions: read
+  security-events: write
+
 # Common Go workflows from go faster
 # See https://github.com/go-faster/x
 jobs:
