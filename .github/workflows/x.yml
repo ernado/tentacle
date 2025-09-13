@@ -8,6 +8,7 @@ on:
 permissions:
   actions: read
   security-events: write
+  contents: read
 
 # Common Go workflows from go faster
 # See https://github.com/go-faster/x
