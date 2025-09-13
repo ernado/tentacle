@@ -14,4 +14,3 @@ jobs:
     uses: go-faster/x/.github/workflows/lint.yml@main
   codeql:
     uses: go-faster/x/.github/workflows/codeql.yml@main
-
