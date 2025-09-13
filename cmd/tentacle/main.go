@@ -205,7 +205,7 @@ func main() {
 					Input:  outputPath,
 					Output: previewPath,
 					Args: []string{
-						"-vf", "scale=-2:250",
+						"-vf", "scale=-2:720",
 						"-frames:v", "1",
 					},
 				}); err != nil {
