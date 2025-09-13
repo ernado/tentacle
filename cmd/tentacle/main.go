@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"github.com/ernado/tentacle/internal/ytio"
 	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/app"
+	"github.com/gotd/td/crypto"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/uploader"
@@ -72,6 +74,10 @@ func main() {
 					Proxy:           proxyURL,
 				}
 				start := time.Now()
+
+				if _, err := answer.Textf(ctx, "Getting info..."); err != nil {
+					return errors.Wrap(err, "send answer")
+				}
 
 				video, err := instance.Video(ctx, uri.String())
 				if err != nil {
@@ -131,6 +137,14 @@ func main() {
 					return errors.Wrap(err, "send answer")
 				}
 
+				tempFile, err := os.CreateTemp("", "video-*.mp4")
+				if err != nil {
+					return errors.Wrap(err, "create temp file")
+				}
+				tempPath := tempFile.Name()
+				_ = tempFile.Close()
+
+				done := make(chan struct{})
 				g, gCtx := errgroup.WithContext(ctx)
 				g.Go(func() error {
 					return ytdlp.DownloadChunked(gCtx, bestVideo, videoFile, httpClient)
@@ -138,9 +152,12 @@ func main() {
 				g.Go(func() error {
 					return ytdlp.DownloadChunked(gCtx, bestAudio, audioFile, httpClient)
 				})
-				outputPath := "/tmp/output.mp4"
+
+				outputPath := tempPath
 				g.Go(func() error {
+					defer close(done)
 					stderr := new(bytes.Buffer)
+					defer lg.Info("ffmpeg done")
 					time.Sleep(time.Second)
 					cmd := exec.CommandContext(gCtx, "ffmpeg",
 						"-i", serveURI.String()+"/video.mp4",
@@ -162,6 +179,79 @@ func main() {
 
 					if err := cmd.Run(); err != nil {
 						return errors.Wrapf(err, "ffmpeg: %s", stderr.String())
+					}
+
+					return nil
+				})
+				g.Go(func() error {
+					// Upload part by part, streaming video from disk.
+					id, err := crypto.RandInt64(crypto.DefaultRand())
+					if err != nil {
+						return errors.Wrap(err, "generate id")
+					}
+
+					stat, err := os.Stat(outputPath)
+					if err != nil {
+						return errors.Wrap(err, "stat")
+					}
+
+					lg.Info("Uploading",
+						zap.Int64("id", id),
+						zap.Int64("size", stat.Size()),
+					)
+
+					const partSize = uploader.MaximumPartSize
+					totalParts := -1
+					if err := ytio.StreamFile(gCtx, done, outputPath, partSize, func(part ytio.StreamPart) error {
+						if len(part.Data) == 0 {
+							lg.Info("Skip empty part")
+							return nil
+						} else {
+							lg.Info("Uploading part",
+								zap.Int("index", part.Index),
+								zap.Int("size", len(part.Data)),
+								zap.Int64("offset", part.Offset),
+							)
+						}
+						if part.Last {
+							totalParts = part.Index
+						}
+						_, err := api.UploadSaveBigFilePart(ctx, &tg.UploadSaveBigFilePartRequest{
+							FileID:         id,
+							FilePart:       part.Index,
+							FileTotalParts: totalParts,
+							Bytes:          part.Data,
+						})
+						if err != nil {
+							return errors.Wrap(err, "upload part")
+						}
+
+						return nil
+					}); err != nil {
+						return errors.Wrap(err, "stream file")
+					}
+
+					// Upload moov atom.
+					data := make([]byte, partSize)
+					file, err := os.Open(outputPath)
+					if err != nil {
+						return errors.Wrap(err, "open file")
+					}
+					defer func() {
+						_ = file.Close()
+					}()
+
+					if _, err := io.ReadFull(file, data); err != nil {
+						return errors.Wrap(err, "read full")
+					}
+
+					if _, err = api.UploadSaveBigFilePart(ctx, &tg.UploadSaveBigFilePartRequest{
+						FileID:         id,
+						FilePart:       1,
+						FileTotalParts: totalParts,
+						Bytes:          data,
+					}); err != nil {
+						return errors.Wrap(err, "upload moov")
 					}
 
 					return nil
