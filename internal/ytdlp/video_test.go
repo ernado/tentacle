@@ -9,9 +9,9 @@ import (
 )
 
 //go:embed _testdata/video.json
-var videeoExample []byte
+var videoExample []byte
 
 func TestVideo(t *testing.T) {
 	var video Video
-	require.NoError(t, json.Unmarshal(videeoExample, &video))
+	require.NoError(t, json.Unmarshal(videoExample, &video))
 }
