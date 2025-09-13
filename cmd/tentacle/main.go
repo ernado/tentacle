@@ -289,11 +289,11 @@ func main() {
 					return errors.Wrap(err, "stat")
 				}
 				partSize := 128 * 1024
-				size := int(stat.Size())
+				size := stat.Size()
 				const (
-					kb int = 1024
-					mb     = kb * 1024
-					gb     = mb * 1024
+					kb int64 = 1024
+					mb       = kb * 1024
+					gb       = mb * 1024
 				)
 				if size > 100*mb {
 					partSize = uploader.MaximumPartSize
