@@ -25,30 +25,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func BestVideo(formats []ytdlp.Format) ytdlp.Format {
-	var best ytdlp.Format
-	for _, f := range formats {
-		if f.VCodec == "none" {
-			continue
-		}
-		best = f
-	}
-
-	return best
-}
-
-func BestAudio(formats []ytdlp.Format) ytdlp.Format {
-	var best ytdlp.Format
-	for _, f := range formats {
-		if f.ACodec == "none" {
-			continue
-		}
-		best = f
-	}
-
-	return best
-}
-
 func main() {
 	app.Run(func(ctx context.Context, lg *zap.Logger, t *app.Telemetry) error {
 		dispatcher := tg.NewUpdateDispatcher()
