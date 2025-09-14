@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/dustin/go-humanize"
 	"github.com/ernado/tentacle/internal/ytio"
 	"github.com/go-faster/errors"
@@ -144,6 +145,9 @@ func FormatExactSize(ctx context.Context, format Format, httpClient *http.Client
 }
 
 func DownloadPart(ctx context.Context, format Format, part *ytio.Part, httpClient *http.Client) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+
 	start := time.Now()
 	req, err := http.NewRequestWithContext(ctx, "GET", format.URL, nil)
 	if err != nil {
@@ -182,7 +186,6 @@ func DownloadPart(ctx context.Context, format Format, part *ytio.Part, httpClien
 		return errors.Wrap(err, "seek part file")
 	}
 
-	// Use io.Copy instead of io.CopyN to handle cases where content length differs
 	written, err := io.Copy(f, res.Body)
 	if err != nil {
 		return errors.Wrap(err, "copy part data")
@@ -226,8 +229,15 @@ func DownloadChunked(ctx context.Context, format Format, file *ytio.File, httpCl
 	for i := 0; i < concurrency; i++ {
 		g.Go(func() error {
 			for part := range parts {
-				if err := DownloadPart(gCtx, format, part, httpClient); err != nil {
-					return errors.Wrap(err, "download part")
+				bo := backoff.NewConstantBackOff(time.Second)
+				if err := backoff.Retry(func() error {
+					if err := DownloadPart(gCtx, format, part, httpClient); err != nil {
+						zctx.From(ctx).Error("Failed to download part", zap.Error(err))
+						return errors.Wrap(err, "download part")
+					}
+					return nil
+				}, backoff.WithMaxRetries(bo, 10)); err != nil {
+					return errors.Wrap(err, "download part with retry")
 				}
 			}
 			return nil

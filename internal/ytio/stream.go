@@ -90,8 +90,6 @@ func StreamFile(
 				}
 				return nil
 			} else {
-				// Not enough data yet.
-				lg.Info("Not enough data yet")
 				continue
 			}
 		}
