@@ -9,11 +9,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ernado/ff/ffprobe"
-	"github.com/ernado/ff/ffrun"
 	"github.com/ernado/tentacle/internal/tgpool"
 	"github.com/ernado/tentacle/internal/ytdlp"
 	"github.com/ernado/tentacle/internal/ytio"
+
+	"github.com/ernado/ff/ffprobe"
+	"github.com/ernado/ff/ffrun"
 	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/app"
 	"github.com/gotd/contrib/middleware/floodwait"
@@ -131,9 +132,9 @@ func main() {
 					sender    = message.NewSender(api)
 					i         = ffrun.New(ffrun.Options{})
 					up        = uploader.NewUploader(pooledAPI).
-							WithPartSize(uploader.MaximumPartSize).
-							WithThreads(3).
-							WithProgress(ZapProgressHandler{Logger: logger.Named("uploader")})
+						WithPartSize(uploader.MaximumPartSize).
+						WithThreads(3).
+						WithProgress(ZapProgressHandler{Logger: logger.Named("uploader")})
 				)
 				dispatcher.OnNewMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewMessage) error {
 					ctx, cancel := context.WithTimeout(ctx, time.Minute*30)
