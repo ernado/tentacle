@@ -87,16 +87,17 @@ func main() {
 
 		g, ctx := errgroup.WithContext(ctx)
 
-		const poolSize = 0
+		const poolSize = 3
 
 		for i := 0; i < poolSize; i++ {
 			waiter := floodwait.NewWaiter()
 
 			g.Go(func() error {
 				filePath := "/tmp/tg-session-" + strconv.Itoa(i) + ".json"
+				lg := logger.Named("tg").With(zap.Int("shard", i))
 				client := telegram.NewClient(appID, appHash, telegram.Options{
 					NoUpdates:      true,
-					Logger:         logger.Named("tg").With(zap.Int("shard", i)),
+					Logger:         lg,
 					TracerProvider: t.TracerProvider(),
 					SessionStorage: &session.FileStorage{
 						Path: filePath,
@@ -105,14 +106,18 @@ func main() {
 				})
 				return waiter.Run(ctx, func(ctx context.Context) error {
 					if err := client.Run(ctx, func(ctx context.Context) error {
-						if _, err := client.Auth().Bot(ctx, botToken); err != nil {
-							return errors.Wrap(err, "bot auth")
+						if _, err := client.Self(ctx); err != nil {
+							if _, err := client.Auth().Bot(ctx, botToken); err != nil {
+								return errors.Wrap(err, "bot auth")
+							}
+						} else {
+							lg.Info("Session loaded from disk", zap.String("path", filePath))
 						}
 						pool.Add(client)
 						<-ctx.Done()
 						return nil
 					}); err != nil {
-						return errors.Wrap(err, "run client")
+						return errors.Wrapf(err, "run client %d", i)
 					}
 
 					return nil
@@ -125,16 +130,11 @@ func main() {
 		}
 		g.Go(func() error {
 			if err := telegram.BotFromEnvironment(ctx, opt, func(ctx context.Context, client *telegram.Client) error {
-				pool.Add(client)
 				var (
 					api       = tg.NewClient(client)
 					pooledAPI = tg.NewClient(pool)
 					sender    = message.NewSender(api)
 					i         = ffrun.New(ffrun.Options{})
-					up        = uploader.NewUploader(pooledAPI).
-						WithPartSize(uploader.MaximumPartSize).
-						WithThreads(3).
-						WithProgress(ZapProgressHandler{Logger: logger.Named("uploader")})
 				)
 				dispatcher.OnNewMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewMessage) error {
 					ctx, cancel := context.WithTimeout(ctx, time.Minute*30)
@@ -149,6 +149,10 @@ func main() {
 						reply  = sender.Reply(e, u)
 						lg     = logger.With(zap.Int("msg_id", m.ID))
 						answer = sender.Answer(e, u)
+						up     = uploader.NewUploader(pooledAPI).
+							WithPartSize(uploader.MaximumPartSize).
+							WithThreads(poolSize).
+							WithProgress(ZapProgressHandler{Logger: lg.Named("uploader")})
 					)
 
 					uri, err := url.Parse(m.Message)
