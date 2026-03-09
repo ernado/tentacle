@@ -1,6 +1,6 @@
 module github.com/ernado/tentacle
 
-go 1.24.0
+go 1.25.0
 
 require (
 	entgo.io/ent v0.14.5
@@ -14,7 +14,7 @@ require (
 	github.com/gotd/td v0.131.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.0
-	golang.org/x/sync v0.16.0
+	golang.org/x/sync v0.20.0
 )
 
 require (
